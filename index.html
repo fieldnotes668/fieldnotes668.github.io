@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="An engineering notebook on the evidence behind digital gift delivery status, with practical links to sample API contracts and recovery tests.">
+  <title>Digital Gift Systems | Field Notes</title>
+  <style>
+    :root { color-scheme: light; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f5f1; color: #1d2927; }
+    * { box-sizing: border-box; }
+    body { margin: 0; line-height: 1.65; }
+    a { color: #125f55; text-underline-offset: .18em; }
+    a:hover { color: #0b4039; }
+    .shell { width: min(100% - 2rem, 860px); margin: 0 auto; }
+    header { background: #183b35; color: #edf5ed; padding: 1.2rem 0 4.2rem; }
+    nav { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; font-size: .85rem; letter-spacing: .07em; text-transform: uppercase; }
+    nav a { color: #c8e6da; }
+    .eyebrow { margin: 4rem 0 .7rem; color: #bce0d4; font-size: .78rem; font-weight: 700; letter-spacing: .17em; text-transform: uppercase; }
+    h1 { max-width: 740px; margin: 0; font-size: clamp(2.4rem, 6vw, 4.4rem); line-height: 1.09; letter-spacing: -.045em; }
+    .intro { max-width: 660px; margin: 1.4rem 0 0; color: #d1e6dd; font-size: 1.16rem; }
+    main { margin-top: -2rem; padding-bottom: 4rem; }
+    article { background: #fff; border: 1px solid #e1e7df; border-radius: 1rem; box-shadow: 0 18px 50px #17362a0d; padding: clamp(1.4rem, 5vw, 3.2rem); }
+    h2 { margin: 2.4rem 0 .7rem; font-size: 1.6rem; line-height: 1.2; letter-spacing: -.025em; }
+    h2:first-child { margin-top: 0; }
+    p { max-width: 72ch; }
+    .lede { font-size: 1.12rem; color: #334c45; }
+    .note { border-left: 3px solid #3d947d; padding: .65rem 1.2rem; background: #f2f8f5; border-radius: 0 .5rem .5rem 0; }
+    table { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .94rem; }
+    th, td { padding: .75rem; text-align: left; vertical-align: top; border-bottom: 1px solid #e3e9e3; }
+    th { background: #f2f6f2; color: #224f43; }
+    code { background: #edf2ee; padding: .12rem .28rem; border-radius: .2rem; font-size: .9em; }
+    .links { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .8rem; margin-top: 1.1rem; }
+    .links a { display: block; border: 1px solid #d6e4da; border-radius: .6rem; padding: 1rem; text-decoration: none; }
+    .links a:hover { background: #f2f8f5; }
+    .links strong { display: block; }
+    .links span { display: block; margin-top: .2rem; color: #52655d; font-size: .9rem; }
+    footer { color: #52655d; font-size: .88rem; padding: 1.6rem 0 3rem; }
+    @media (max-width: 600px) { table { display: block; overflow-x: auto; } th, td { min-width: 150px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <nav><strong>Field Notes</strong><a href="#references">Read the examples</a></nav>
+      <p class="eyebrow">Digital gift systems / engineering notebook</p>
+      <h1>What does “delivered” actually prove?</h1>
+      <p class="intro">A useful status page tells people what the system knows, where that evidence came from, and what remains uncertain.</p>
+    </div>
+  </header>
+  <main class="shell">
+    <article>
+      <h2>One purchase, several different facts</h2>
+      <p class="lede">A checkout can succeed while an email is delayed. A delivery provider can accept a request without proving that the recipient saw it. A recipient can open a message without redeeming its gift. Compressing all of those facts into a single “sent” flag makes support harder and can tempt a system into an unsafe resend.</p>
+      <p>A better model separates the <em>buyer’s intent</em>, the <em>order decision</em>, the <em>provider’s acknowledgement</em>, and any later <em>recipient action</em>. Each layer has its own identifier and evidence source. This is a design pattern for a fictional service, not a claim about a specific issuer or delivery provider.</p>
+
+      <h2>An evidence ladder</h2>
+      <table>
+        <thead><tr><th>What happened</th><th>Evidence to keep</th><th>What the UI can safely say</th></tr></thead>
+        <tbody>
+          <tr><td>Order created</td><td>Committed order and checkout idempotency key</td><td>“Your order is recorded.”</td></tr>
+          <tr><td>Send queued</td><td>Durable job ID</td><td>“Delivery is being prepared.”</td></tr>
+          <tr><td>Provider accepted</td><td>Provider request ID and acknowledgement</td><td>“The delivery provider accepted the request.”</td></tr>
+          <tr><td>Recipient opened or redeemed</td><td>A distinct, trusted event with a documented meaning</td><td>Only the specific action that event actually proves</td></tr>
+        </tbody>
+      </table>
+      <p class="note">A network timeout is missing evidence. It does not prove that the provider rejected the request. Before resending, reconcile using the stored request ID or move the job to a review state.</p>
+
+      <h2>Design for the awkward minute after checkout</h2>
+      <p>Suppose the provider accepts a send request, but its response is lost. The worker sees a timeout. A blind retry might produce a second message; telling the buyer to purchase again could create a second charge. The safer path is to keep the original order visible, mark the send outcome as uncertain, and ask the provider about the same request if its API allows that lookup.</p>
+      <p>For each state change, store an event ID, source, observed time, and the order or delivery job it belongs to. That small audit trail lets support distinguish a real provider rejection from a delayed acknowledgement. It also makes duplicate or out-of-order callbacks testable.</p>
+      <p>The public status view should omit gift codes, redemption URLs, full recipient addresses, and raw provider payloads. A status page is useful even when it has little data; it does not need to expose bearer-value material to explain a delay.</p>
+
+      <h2 id="references">Working examples</h2>
+      <p>These companion documents show the contract and recovery behavior in more detail. They are examples rather than a production API.</p>
+      <div class="links">
+        <a href="https://gift-delivery-idempotency-example.readthedocs.io/en/latest/"><strong>Idempotency and recovery</strong><span>A request contract, stable identities, and failure tests.</span></a>
+        <a href="https://digital-gift-fieldnotes.gitbook.io/digital-gift-fieldnotes-docs/"><strong>Delivery status contract</strong><span>State meanings, authorization, and safe UI messages.</span></a>
+      </div>
+    </article>
+    <footer>Field Notes is an independent engineering notebook exploring digital-gifting questions relevant to <a href="https://cardnaro.com/">CardNaro</a>. No customer data or redeemable gift codes are used in these examples.</footer>
+  </main>
+</body>
+</html>
