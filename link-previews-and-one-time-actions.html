@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="A practical technical note on designing email gift access links so previews and scanners cannot consume a one-time action.">
+  <meta name="robots" content="index,follow">
+  <meta name="referrer" content="no-referrer">
+  <title>A preview is not consent: one-time links in email | Field Notes</title>
+  <style>
+    :root{color-scheme:light;--ink:#173432;--muted:#526963;--green:#0e6b60;--line:#cfdfd6;--paper:#f7f8f3;--soft:#e8f3eb}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.68 system-ui,-apple-system,"Segoe UI",sans-serif}
+    a{color:var(--green);text-underline-offset:.16em}a:focus-visible{outline:3px solid #8ed0b9;outline-offset:3px}
+    header{background:#fff;border-bottom:1px solid var(--line)}
+    .shell{max-width:1080px;margin:auto;padding:0 28px}
+    header .shell{display:flex;align-items:center;justify-content:space-between;min-height:68px;gap:20px}
+    header a{font-size:14px;font-weight:750;text-decoration:none;color:var(--ink)}
+    header small{font-size:12px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+    .hero{padding:70px 0 60px;background:radial-gradient(circle at 85% 10%,#e2f2e8,transparent 33%),#fff;border-bottom:1px solid var(--line)}
+    .eyebrow{font-size:12px;font-weight:800;letter-spacing:.15em;text-transform:uppercase;color:var(--green)}
+    h1{font:600 clamp(42px,5.4vw,68px)/1.08 Georgia,"Times New Roman",serif;letter-spacing:-.04em;max-width:900px;margin:18px 0 22px}
+    .deck{max-width:770px;margin:0;color:#3e5952;font-size:clamp(19px,2vw,23px);line-height:1.52}
+    .meta{margin-top:27px;color:var(--muted);font-size:14px}
+    main .shell{display:grid;grid-template-columns:210px minmax(0,1fr);gap:54px;padding-top:55px;padding-bottom:80px}
+    nav{position:sticky;top:24px;align-self:start}
+    nav b{display:block;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#6b8076;margin-bottom:13px}
+    nav a{display:block;padding:7px 0 7px 11px;border-left:2px solid var(--line);text-decoration:none;color:#536c64;font-size:14px;line-height:1.38}
+    nav a:hover{border-color:var(--green);color:var(--green)}
+    article{min-width:0;max-width:790px}
+    article p{margin:0 0 22px}article h2{font:600 34px/1.2 Georgia,"Times New Roman",serif;letter-spacing:-.025em;margin:53px 0 18px;scroll-margin-top:30px}
+    article h2:first-child{margin-top:0}article h3{font-size:20px;margin:32px 0 10px}
+    article ul,article ol{margin:0 0 25px;padding-left:26px}article li{margin:9px 0;padding-left:4px}
+    .lead{font-size:21px;line-height:1.6;color:#2d4a42}
+    .callout{border-left:4px solid var(--green);background:var(--soft);padding:18px 22px;margin:26px 0;border-radius:0 8px 8px 0}
+    .callout p:last-child{margin:0}
+    .table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:9px;background:white;margin:24px 0 28px}
+    table{width:100%;border-collapse:collapse;min-width:550px;font-size:15px;line-height:1.5}
+    th,td{text-align:left;vertical-align:top;padding:12px 15px;border-bottom:1px solid var(--line)}
+    th{background:#eaf2eb}tr:last-child td{border-bottom:0}
+    pre{overflow-x:auto;border:1px solid #c9d9d1;border-radius:9px;background:#edf4ee;padding:18px 20px;font:14px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
+    code{font: .9em ui-monospace,SFMono-Regular,Consolas,monospace}
+    .sources{font-size:14px;color:#526963;border-top:1px solid var(--line);padding-top:20px}
+    .sources li{margin:6px 0}
+    footer{border-top:1px solid var(--line);padding:23px 28px;color:var(--muted);font-size:13px;text-align:center}
+    @media(max-width:760px){.hero{padding:48px 0}.shell{padding-left:20px;padding-right:20px}main .shell{display:block;padding-top:30px}nav{position:static;margin-bottom:38px}nav a{display:inline-block;border:0;padding:4px 9px 4px 0}article h2{font-size:29px}}
+  </style>
+</head>
+<body>
+  <header><div class="shell"><a href="/">FIELD NOTES</a><small>Engineering notebook</small></div></header>
+  <section class="hero"><div class="shell"><div class="eyebrow">Email links / system design</div><h1>A preview is not consent: one-time links in email</h1><p class="deck">If simply opening a URL uses up a gift claim, an email security check or link preview can do the claiming before the recipient gets there.</p><div class="meta">An independent design example · October 2026</div></div></section>
+  <main><div class="shell">
+    <nav aria-label="On this page"><b>On this page</b><a href="#failure">The failure mode</a><a href="#contract">A safer request contract</a><a href="#data">State and token data</a><a href="#tests">Tests worth running</a><a href="#sources">Sources</a></nav>
+    <article>
+      <h2 id="failure">The failure mode</h2>
+      <p class="lead">Imagine an email containing <code>/claim/abc123</code>. The server treats a GET request for that address as a completed claim and invalidates the token. The recipient later clicks the link and sees “already used.”</p>
+      <p>That request could have come from the recipient. It could also have come from software checking or previewing the link. Microsoft's Safe Links documentation describes URL checks during mail flow and again at click time, depending on the policy. HTTP itself treats GET as a safe method: the client is asking for a representation, not requesting a value-changing action. A claim endpoint that mutates state on GET conflicts with that expectation.</p>
+      <div class="callout"><p><strong>Keep two questions separate.</strong> “Can this URL be displayed?” and “Is this person authorized to claim this gift?” require different evidence. A request for the first should never silently answer the second.</p></div>
+
+      <h2 id="contract">A safer request contract</h2>
+      <div class="table-wrap"><table><thead><tr><th>Request</th><th>Server behavior</th><th>State change</th></tr></thead><tbody>
+        <tr><td><code>GET /access/{token}</code></td><td>Show a neutral landing page. The response may explain the next step without revealing gift value or ownership.</td><td>None</td></tr>
+        <tr><td><code>HEAD /access/{token}</code></td><td>Return headers with the same safety expectations as GET.</td><td>None</td></tr>
+        <tr><td><code>POST /access/{token}/confirm</code></td><td>Check the required authorization, token state, and request integrity. Apply the claim once.</td><td>One atomic transition</td></tr>
+      </tbody></table></div>
+      <p>The POST is a deliberate action, but a button alone is not a security boundary. Before changing state, verify the person or channel to the degree that the underlying gift requires. Protect the form against cross-site submission, and ensure the server checks the token again at commit time.</p>
+      <p>For a link that merely displays non-sensitive delivery status, the authorization threshold may be lower. For a link that reveals a redeemable code or transfers value, it should be stronger. The exact rule belongs in the product's threat model.</p>
+
+      <h2 id="data">State and token data</h2>
+      <p>Store a hash of the access token and a separate claim record. The URL token is a credential, so keep it out of analytics events, third-party embeds, and routine application logs. A page that contains token-derived data should use a restrictive referrer policy and avoid shared caching.</p>
+      <pre><code>GET /access/{token}
+  read token state
+  render landing page
+  do not claim, redeem, resend, or invalidate
+
+POST /access/{token}/confirm
+  verify requester and request integrity
+  begin transaction
+    lock claim record
+    reject expired, used, or superseded token
+    record one claim with an idempotency key
+    mark token used
+  commit
+  return the result for that same claim</code></pre>
+      <p>This is a sketch, not a drop-in implementation. A real system must define how the gift issuer confirms redemption, how an uncertain external result is reconciled, and whether the token permits viewing, claiming, or both. Never trigger a second external fulfillment call simply because a response was lost.</p>
+
+      <h2 id="tests">Tests worth running</h2>
+      <ol>
+        <li>Fetch the link with GET and HEAD several times before a human opens it. The gift remains unclaimed.</li>
+        <li>Submit the confirmation twice, including two concurrent requests. Exactly one claim is recorded.</li>
+        <li>Replace a link, then revisit the old one. It cannot claim or reveal the gift.</li>
+        <li>Open the landing page with an unknown token. The public response does not expose whether an order exists.</li>
+        <li>Inspect logs and analytics. No usable gift code or access token appears.</li>
+      </ol>
+      <p>The smallest useful rule is also the most important one: a read must remain a read. Put the value-changing action behind an explicit, authorized request and make its result repeatable.</p>
+
+      <h2 id="sources">Sources</h2>
+      <ol class="sources"><li><a href="https://www.rfc-editor.org/rfc/rfc9110.html#name-safe-methods">RFC 9110, HTTP Semantics: Safe Methods</a>. Defines GET and HEAD as safe methods from the client's perspective.</li><li><a href="https://learn.microsoft.com/en-us/defender-office-365/safe-links-about">Microsoft Learn: Safe Links in Defender for Office 365</a>. Describes URL scanning during mail flow and at click time.</li></ol>
+    </article>
+  </div></main>
+  <footer>Field Notes · Independent engineering examples · No customer data or redeemable codes</footer>
+</body>
+</html>
